@@ -21,9 +21,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MODEL_PATH = "model.pkl"
-SCALER_PATH = "scaler.pkl"
-TASK_MODEL_PATH = "hand_landmarker.task"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, "model.pkl")
+SCALER_PATH = os.path.join(BASE_DIR, "scaler.pkl")
+TASK_MODEL_PATH = os.path.join(BASE_DIR, "hand_landmarker.task")
 
 # Load model, scaler, and landmarker at startup if available
 try:

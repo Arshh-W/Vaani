@@ -1,7 +1,15 @@
 /**
+ * Base URL configuration for local vs production environments
+ */
+const DEFAULT_API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+/**
  * Send extracted hand landmark features to FastAPI backend
  */
-export async function predictFromFeatures(features: number[], apiEndpoint: string = "http://localhost:8000/predict/features"): Promise<string | null> {
+export async function predictFromFeatures(
+  features: number[], 
+  apiEndpoint: string = `${DEFAULT_API_URL}/predict/features`
+): Promise<string | null> {
   try {
     const response = await fetch(apiEndpoint, {
       method: "POST",
@@ -16,7 +24,7 @@ export async function predictFromFeatures(features: number[], apiEndpoint: strin
     }
 
     const data = await response.json();
-    return data.prediction;
+    return data.prediction || data.result || data.text || data.label || data.sign;
   } catch (error) {
     console.error("Prediction API Error:", error);
     return null;
@@ -24,21 +32,25 @@ export async function predictFromFeatures(features: number[], apiEndpoint: strin
 }
 
 /**
- * Upload a captured image frame to backend
+ * Send captured raw image blob directly to backend
  */
-export async function predictFromImageBlob(imageBlob: Blob, apiEndpoint: string = "http://localhost:8000/predict/image"): Promise<string | null> {
-  const formData = new FormData();
-  formData.append("file", imageBlob, "frame.jpg");
-
+export async function predictFromImageBlob(
+  imageBlob: Blob, 
+  apiEndpoint: string = `${DEFAULT_API_URL}/predict/image`
+): Promise<string | null> {
   try {
     const response = await fetch(apiEndpoint, {
       method: "POST",
-      body: formData,
+      headers: {
+        "Content-Type": "image/jpeg", // Matches backend raw byte decoding
+      },
+      body: imageBlob,
     });
 
     if (!response.ok) throw new Error("Image upload failed");
+    
     const data = await response.json();
-    return data.prediction;
+    return data.prediction || data.result || data.text || data.label || data.sign;
   } catch (error) {
     console.error("Image Prediction Error:", error);
     return null;
