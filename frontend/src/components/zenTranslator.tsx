@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import Webcam from 'react-webcam';
-import { Activity, MessageSquare, Video } from 'lucide-react';
+import { Activity, MessageSquare, Video, Space, Delete, RotateCcw } from 'lucide-react';
 
 declare const Hands: any;
 
@@ -13,12 +13,19 @@ interface ZenProps {
 export const ZenTranslator: React.FC<ZenProps> = ({ apiEndpoint, confidenceThreshold, highContrast }) => {
   const webcamRef = useRef<Webcam>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [translation, setTranslation] = useState<string>("Waiting for hand gestures...");
+  
+  // State management for live prediction and accumulated text
+  const [currentSign, setCurrentSign] = useState<string>("Waiting for hand gestures...");
+  const [accumulatedText, setAccumulatedText] = useState<string>("");
   const [confidence, setConfidence] = useState<number>(0);
   const [isVirtualCamActive, setIsVirtualCamActive] = useState(false);
   
   const isHC = highContrast;
   const lastSentRef = useRef<number>(0);
+
+  // References for stabilization (prevents letter spamming while holding a gesture)
+  const lastPredictedRef = useRef<string>("");
+  const stableCountRef = useRef<number>(0);
 
   useEffect(() => {
     const hands = new Hands({
@@ -69,7 +76,6 @@ export const ZenTranslator: React.FC<ZenProps> = ({ apiEndpoint, confidenceThres
     if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
       const landmarks = results.multiHandLandmarks[0];
       
-      // Access HAND_CONNECTIONS from the window object loaded via CDN script in index.html
       const connections = (window as any).HAND_CONNECTIONS;
 
       // Draw Skeleton Connections
@@ -98,13 +104,15 @@ export const ZenTranslator: React.FC<ZenProps> = ({ apiEndpoint, confidenceThres
       }
 
       const now = Date.now();
-      if (now - lastSentRef.current > 200) {
+      if (now - lastSentRef.current > 250) {
         lastSentRef.current = now;
         sendLandmarksToBackend(landmarks);
       }
     } else {
-      setTranslation("No hand detected");
+      setCurrentSign("No hand detected");
       setConfidence(0);
+      lastPredictedRef.current = "";
+      stableCountRef.current = 0;
     }
     ctx.restore();
   };
@@ -117,8 +125,28 @@ export const ZenTranslator: React.FC<ZenProps> = ({ apiEndpoint, confidenceThres
         body: JSON.stringify({ landmarks }),
       });
       const data = await response.json();
-      setTranslation(data.gesture || "Translating...");
-      setConfidence(data.confidence || 0);
+      
+      // Match all possible backend key variations
+      const detected = data.prediction || data.gesture || data.text || data.label || data.sign;
+
+      if (detected) {
+        setCurrentSign(detected);
+        setConfidence(data.confidence || 0.95); // Default high confidence for active matches
+
+        // Stabilization logic: Require the same letter for 3 steady checks before appending
+        if (detected === lastPredictedRef.current) {
+          stableCountRef.current += 1;
+          if (stableCountRef.current === 3) {
+            setAccumulatedText((prev) => prev + detected);
+            stableCountRef.current = 0; // Reset counter after appending
+          }
+        } else {
+          lastPredictedRef.current = detected;
+          stableCountRef.current = 1;
+        }
+      } else {
+        setCurrentSign("Translating...");
+      }
     } catch (err) {
       // Quietly handle connection errors if backend isn't up yet
     }
@@ -177,13 +205,43 @@ export const ZenTranslator: React.FC<ZenProps> = ({ apiEndpoint, confidenceThres
       {/* Right Column: Output & Custom Phrases */}
       <section className="lg:col-span-5 flex flex-col gap-6">
         
-        {/* Real-time Output Card */}
-        <div className={`flex flex-col justify-center p-8 rounded-3xl border shadow-lg h-64
+        {/* Real-time Current Sign Card */}
+        <div className={`flex flex-col justify-center p-6 rounded-3xl border shadow-lg
           ${isHC ? 'bg-gray-900 border-yellow-500' : 'bg-white/80 border-emerald-100'}`}>
-          <h2 className="text-xs uppercase tracking-widest font-bold mb-4 opacity-70">Translation</h2>
-          <p className="text-3xl md:text-4xl font-semibold text-center leading-tight mb-auto">
-            {translation}
-          </p>
+          <div className="flex justify-between items-center mb-2">
+            <h2 className="text-xs uppercase tracking-widest font-bold opacity-70">Current Detected Sign</h2>
+            <span className="text-sm font-bold text-emerald-600">{currentSign}</span>
+          </div>
+
+          {/* Accumulated Word/Sentence Display Box */}
+          <div className={`p-4 rounded-2xl border min-h-[80px] flex items-center ${isHC ? 'bg-gray-800 border-yellow-700 text-yellow-300' : 'bg-emerald-50/50 border-emerald-200 text-gray-900'}`}>
+            <p className="text-2xl font-bold tracking-wide break-all">
+              {accumulatedText || <span className="text-sm font-normal opacity-50">Signing letters will form words here...</span>}
+            </p>
+          </div>
+
+          {/* Sentence Control Action Buttons */}
+          <div className="flex gap-2 mt-3">
+            <button 
+              onClick={() => setAccumulatedText((prev) => prev + " ")}
+              className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-bold border transition-colors flex items-center justify-center gap-1 ${isHC ? 'bg-gray-800 border-yellow-700 hover:bg-gray-700' : 'bg-white border-emerald-200 hover:bg-emerald-100'}`}
+            >
+              <Space className="w-3.5 h-3.5" /> Space
+            </button>
+            <button 
+              onClick={() => setAccumulatedText((prev) => prev.slice(0, -1))}
+              className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-bold border transition-colors flex items-center justify-center gap-1 ${isHC ? 'bg-gray-800 border-yellow-700 hover:bg-gray-700' : 'bg-white border-emerald-200 hover:bg-emerald-100'}`}
+            >
+              <Delete className="w-3.5 h-3.5" /> Backspace
+            </button>
+            <button 
+              onClick={() => setAccumulatedText("")}
+              className={`py-1.5 px-3 rounded-xl text-xs font-bold border transition-colors flex items-center justify-center gap-1 text-red-500 ${isHC ? 'bg-gray-800 border-yellow-700 hover:bg-gray-700' : 'bg-white border-emerald-200 hover:bg-emerald-100'}`}
+            >
+              <RotateCcw className="w-3.5 h-3.5" /> Clear
+            </button>
+          </div>
+
           <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden mt-4">
             <div className={`h-full transition-all duration-300 ${isHC ? 'bg-yellow-400' : 'bg-emerald-500'}`} style={{ width: `${confidence * 100}%` }} />
           </div>
@@ -199,7 +257,7 @@ export const ZenTranslator: React.FC<ZenProps> = ({ apiEndpoint, confidenceThres
             {quickPhrases.map((phrase, idx) => (
               <button 
                 key={idx}
-                onClick={() => setTranslation(phrase)}
+                onClick={() => setAccumulatedText(phrase)}
                 className={`p-3 text-left rounded-xl text-sm font-medium transition-colors border
                   ${isHC ? 'bg-gray-800 border-yellow-900 hover:border-yellow-400' : 'bg-emerald-50 border-emerald-100 hover:bg-emerald-100'}`}
               >

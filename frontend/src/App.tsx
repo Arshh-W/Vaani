@@ -5,11 +5,10 @@ import { SettingsModal } from './components/SettingsModal';
 import { LearningMode } from './components/LearningMode';
 import { Community } from './components/Community';
 import { EmergencyModal } from './components/EmergencyModal';
-import { GestureDictionary } from './components/GestureDictionary'; // Add this import
+import { GestureDictionary } from './components/GestureDictionary';
 import { Navbar } from './components/Navbar';
 import { Footer } from './components/Footer';
 
-// Add 'dictionary' to the ViewState type
 export type ViewState = 'translator' | 'how-to-use' | 'learn' | 'community' | 'dictionary';
 
 export function App() {
@@ -19,7 +18,8 @@ export function App() {
   
   const [highContrast, setHighContrast] = useState(false);
   const [largeText, setLargeText] = useState(false);
-  const [apiEndpoint, setApiEndpoint] = useState('http://localhost:8000/predict');
+  // Default to the FastAPI image/frame prediction endpoint
+  const [apiEndpoint, setApiEndpoint] = useState('http://localhost:8000/predict/image');
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.6);
 
   const themeClasses = highContrast 
@@ -52,7 +52,7 @@ export function App() {
         {currentView === 'how-to-use' && <HowToUse onBack={() => setCurrentView('translator')} />}
         {currentView === 'learn' && <LearningMode highContrast={highContrast} />}
         {currentView === 'community' && <Community highContrast={highContrast} />}
-        {currentView === 'dictionary' && <GestureDictionary highContrast={highContrast} />} {/* Render Dictionary */}
+        {currentView === 'dictionary' && <GestureDictionary highContrast={highContrast} />}
       </div>
 
       <SettingsModal 

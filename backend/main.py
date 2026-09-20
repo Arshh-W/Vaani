@@ -1,14 +1,18 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import torch
-import torch.nn as nn
+import joblib
 import numpy as np
-from typing import List
+import cv2
+import mediapipe as mp
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
+import os
+import base64
 
-app = FastAPI(title="KineVox ML Engine")
+app = FastAPI(title="Vaani Backend API", version="1.0")
 
-# Enable CORS for local Vite development
+# Enable CORS for your React/Vite frontend development server
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,80 +21,140 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-CLASSES = ["Hello", "Thank You", "Yes", "No", "Help"]
+MODEL_PATH = "model.pkl"
+SCALER_PATH = "scaler.pkl"
+TASK_MODEL_PATH = "hand_landmarker.task"
 
-# PyTorch MLP Architecture
-class LandmarkClassifier(nn.Module):
-    def __init__(self, input_dim=63, num_classes=5):
-        super(LandmarkClassifier, self).__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, 128),
-            nn.ReLU(),
-            nn.BatchNorm1d(128),
-            nn.Dropout(0.2),
-            nn.Linear(128, 64),
-            nn.ReLU(),
-            nn.Linear(64, num_classes)
-        )
-        
-    def forward(self, x):
-        return self.net(x)
-
-# Initialize model
-model = LandmarkClassifier()
-model.eval()
-
-# Try loading trained weights if available
+# Load model, scaler, and landmarker at startup if available
 try:
-    model.load_state_dict(torch.load("model.pth", map_location=torch.device('cpu')))
-    print("Loaded custom PyTorch model weights.")
-except Exception:
-    print("No trained weights found. Using model with fallback landmark rules.")
-
-class LandmarkRequest(BaseModel):
-    # Expecting 21 dicts containing x, y, z relative to frame
-    landmarks: List[dict]
-
-def normalize_landmarks(landmarks):
-    """Normalize 21 landmarks relative to wrist (index 0) for scale & position invariance."""
-    if not landmarks or len(landmarks) != 21:
-        return None
+    clf = joblib.load(MODEL_PATH) if os.path.exists(MODEL_PATH) else None
+    scaler = joblib.load(SCALER_PATH) if os.path.exists(SCALER_PATH) else None
     
-    ref_x = landmarks[0]['x']
-    ref_y = landmarks[0]['y']
-    ref_z = landmarks[0]['z']
-    
-    normalized = []
-    for lm in landmarks:
-        normalized.extend([
-            lm['x'] - ref_x,
-            lm['y'] - ref_y,
-            lm['z'] - ref_z
-        ])
-    return np.array(normalized, dtype=np.float32)
+    base_options = python.BaseOptions(model_asset_path=TASK_MODEL_PATH)
+    options = vision.HandLandmarkerOptions(
+        base_options=base_options,
+        running_mode=vision.RunningMode.IMAGE,
+        num_hands=1
+    )
+    detector = vision.HandLandmarker.create_from_options(options)
+    print("[Info] FastAPI backend components initialized.")
+except Exception as e:
+    print(f"[Warning] Initialization warning: {e}")
 
-@app.post("/predict")
-async def predict_gesture(data: LandmarkRequest):
-    feat = normalize_landmarks(data.landmarks)
-    if feat is None:
-        return {"gesture": "None", "confidence": 0.0}
+class FeatureInput(BaseModel):
+    features: list[float]
 
-    # Tensor conversion
-    inputs = torch.tensor(feat).unsqueeze(0) # Shape: [1, 63]
-
-    with torch.no_grad():
-        outputs = model(inputs)
-        probs = torch.softmax(outputs, dim=1)
-        conf, pred = torch.max(probs, 1)
-
-    predicted_label = CLASSES[pred.item()]
-    confidence = round(float(conf.item()), 3)
-
+@app.get("/")
+def read_root():
     return {
-        "gesture": predicted_label if confidence > 0.4 else "Detecting...",
-        "confidence": confidence
+        "status": "Vaani backend is running",
+        "model_loaded": os.path.exists(MODEL_PATH) and os.path.exists(SCALER_PATH)
     }
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+@app.post("/predict/features")
+def predict_from_features(data: FeatureInput):
+    """Accepts a 63-element feature array computed directly on the frontend."""
+    if not clf or not scaler:
+        raise HTTPException(status_code=500, detail="Model or scaler not loaded.")
+    
+    try:
+        arr = np.array(data.features, dtype=np.float32).reshape(1, -1)
+        if arr.shape[1] != 63:
+            raise HTTPException(status_code=400, detail=f"Expected 63 features, got {arr.shape[1]}.")
+        
+        scaled = scaler.transform(arr)
+        prediction = str(clf.predict(scaled)[0])
+        print(f"🎯 MODEL PREDICTION (/predict/features): '{prediction}'")
+        
+        return {
+            "prediction": prediction,
+            "result": prediction,
+            "text": prediction,
+            "label": prediction,
+            "sign": prediction
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/predict/image")
+async def predict_from_image(request: Request):
+    """Handles client-side JSON landmarks and raw image fallback with prediction logging."""
+    if not clf or not scaler:
+        raise HTTPException(status_code=500, detail="Model or scaler not loaded.")
+    
+    try:
+        content_type = request.headers.get("content-type", "")
+        
+        # 1. If frontend sends JSON containing landmarks (Client-side MediaPipe)
+        if "application/json" in content_type:
+            body_json = await request.json()
+            
+            if "landmarks" in body_json:
+                raw_landmarks = body_json["landmarks"]
+                features = []
+                
+                for lm in raw_landmarks:
+                    if isinstance(lm, dict):
+                        features.extend([
+                            float(lm.get("x", 0)), 
+                            float(lm.get("y", 0)), 
+                            float(lm.get("z", 0))
+                        ])
+                
+                if len(features) != 63:
+                    raise HTTPException(status_code=400, detail=f"Expected 63 values, got {len(features)}")
+                
+                arr = np.array([features], dtype=np.float32)
+                scaled = scaler.transform(arr)
+                prediction = str(clf.predict(scaled)[0])
+                
+                print(f"🎯 MODEL PREDICTION (JSON landmarks): '{prediction}'")
+                
+                return {
+                    "prediction": prediction,
+                    "result": prediction,
+                    "text": prediction,
+                    "label": prediction,
+                    "sign": prediction
+                }
+
+        # 2. Fallback: Raw image bytes / form-data
+        contents = await request.body()
+        if not contents:
+            raise HTTPException(status_code=400, detail="No valid payload received.")
+
+        nparr = np.frombuffer(contents, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is None:
+            raise HTTPException(status_code=400, detail="Invalid image format.")
+        
+        rgb_image = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_image)
+        
+        result = detector.detect(mp_image)
+        if not result.hand_landmarks:
+            print("⚠️ Server-side MediaPipe: No hand detected in frame.")
+            return {"prediction": None, "result": None, "text": "", "label": "", "sign": "", "message": "No hand detected."}
+        
+        landmarks = result.hand_landmarks[0]
+        features = []
+        for lm in landmarks:
+            features.extend([lm.x, lm.y, lm.z])
+            
+        arr = np.array([features], dtype=np.float32)
+        scaled = scaler.transform(arr)
+        prediction = str(clf.predict(scaled)[0])
+        
+        print(f"🎯 MODEL PREDICTION (Server image): '{prediction}'")
+        
+        return {
+            "prediction": prediction,
+            "result": prediction,
+            "text": prediction,
+            "label": prediction,
+            "sign": prediction
+        }
+        
+    except Exception as e:
+        print(f"[Error] /predict/image exception: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
