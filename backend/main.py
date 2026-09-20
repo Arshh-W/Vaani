@@ -15,7 +15,10 @@ app = FastAPI(title="Vaani Backend API", version="1.0")
 # Enable CORS for your React/Vite frontend development server
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://vaaniiii.netlify.app", # Your exact Netlify frontend URL
+        "http://localhost:5173",          # Keeps local testing working too
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
