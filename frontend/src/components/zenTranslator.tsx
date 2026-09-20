@@ -1,22 +1,35 @@
 import React, { useRef, useEffect, useState } from 'react';
 import Webcam from 'react-webcam';
-import { Hands, HAND_CONNECTIONS, type Results } from '@mediapipe/hands';
-import { Camera } from '@mediapipe/camera_utils';
-import { Volume2, VolumeX, Sparkles, Activity } from 'lucide-react';
+import { Volume2, VolumeX, Leaf, Activity, HelpCircle, Home, Settings } from 'lucide-react';
+
+declare const Hands: any;
+declare const HAND_CONNECTIONS: any;
 
 export const ZenTranslator: React.FC = () => {
   const webcamRef = useRef<Webcam>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  
   const [translation, setTranslation] = useState<string>("Waiting for hand gestures...");
   const [confidence, setConfidence] = useState<number>(0);
   const [audioMuted, setAudioMuted] = useState<boolean>(true);
+  const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
 
-  // Throttle backend requests to prevent overload
   const lastSentRef = useRef<number>(0);
 
   useEffect(() => {
+    if (audioRef.current) {
+      if (audioMuted) {
+        audioRef.current.pause();
+      } else {
+        audioRef.current.play().catch(() => {});
+      }
+    }
+  }, [audioMuted]);
+
+  useEffect(() => {
     const hands = new Hands({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+      locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
     });
 
     hands.setOptions({
@@ -28,21 +41,31 @@ export const ZenTranslator: React.FC = () => {
 
     hands.onResults(onResults);
 
-    if (webcamRef.current && webcamRef.current.video) {
-      const camera = new Camera(webcamRef.current.video, {
-        onFrame: async () => {
-          if (webcamRef.current?.video) {
-            await hands.send({ image: webcamRef.current.video });
-          }
-        },
-        width: 640,
-        height: 480,
-      });
-      camera.start();
-    }
+    let animationFrameId: number;
+
+    const processVideoFrame = async () => {
+      if (
+        webcamRef.current &&
+        webcamRef.current.video &&
+        webcamRef.current.video.readyState === 4
+      ) {
+        setIsCameraActive(true);
+        await hands.send({ image: webcamRef.current.video });
+      }
+      animationFrameId = requestAnimationFrame(processVideoFrame);
+    };
+
+    processVideoFrame();
+
+    return () => {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+      }
+      hands.close();
+    };
   }, []);
 
-  const onResults = (results: Results) => {
+  const onResults = (results: any) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -54,27 +77,31 @@ export const ZenTranslator: React.FC = () => {
     if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
       const landmarks = results.multiHandLandmarks[0];
 
-      // Draw connections
-      for (const connection of HAND_CONNECTIONS) {
-        const from = landmarks[connection[0]];
-        const to = landmarks[connection[1]];
+      // Draw Serene Green Skeleton Connections
+      if (typeof HAND_CONNECTIONS !== 'undefined') {
+        for (const connection of HAND_CONNECTIONS) {
+          const from = landmarks[connection[0]];
+          const to = landmarks[connection[1]];
+          ctx.beginPath();
+          ctx.moveTo(from.x * canvas.width, from.y * canvas.height);
+          ctx.lineTo(to.x * canvas.width, to.y * canvas.height);
+          ctx.strokeStyle = '#34d399'; // emerald-400
+          ctx.lineWidth = 4;
+          ctx.stroke();
+        }
+      }
+
+      // Draw Landmark Joints
+      for (const lm of landmarks) {
         ctx.beginPath();
-        ctx.moveTo(from.x * canvas.width, from.y * canvas.height);
-        ctx.lineTo(to.x * canvas.width, to.y * canvas.height);
-        ctx.strokeStyle = '#38bdf8';
-        ctx.lineWidth = 3;
+        ctx.arc(lm.x * canvas.width, lm.y * canvas.height, 5, 0, 2 * Math.PI);
+        ctx.fillStyle = '#059669'; // emerald-600
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
         ctx.stroke();
       }
 
-      // Draw landmark joints
-      for (const lm of landmarks) {
-        ctx.beginPath();
-        ctx.arc(lm.x * canvas.width, lm.y * canvas.height, 4, 0, 2 * Math.PI);
-        ctx.fillStyle = '#f43f5e';
-        ctx.fill();
-      }
-
-      // Post keypoints to backend max 5 times per second
       const now = Date.now();
       if (now - lastSentRef.current > 200) {
         lastSentRef.current = now;
@@ -98,77 +125,103 @@ export const ZenTranslator: React.FC = () => {
       setTranslation(data.gesture);
       setConfidence(data.confidence);
     } catch (err) {
-      console.error("Inference Error:", err);
+      // Prevent console pollution during development before backend API is online
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 relative overflow-hidden font-sans">
-      {/* Zen Ambient Background Orbs */}
-      <div className="absolute top-10 left-10 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-10 right-10 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+    <div className="min-h-screen bg-emerald-50/60 text-emerald-950 flex flex-col items-center p-4 md:p-8 font-sans transition-colors duration-500">
+      
+      {/* Background Ambient Audio */}
+      <audio ref={audioRef} src="/ambient.mp3" loop />
 
-      {/* Header */}
-      <header className="w-full max-w-4xl flex items-center justify-between mb-8 z-10 backdrop-blur-md bg-slate-900/40 p-4 rounded-2xl border border-slate-800">
+      {/* Main Navigation Header */}
+      <nav className="w-full max-w-6xl flex items-center justify-between mb-8 bg-white/70 backdrop-blur-lg px-6 py-4 rounded-2xl border border-emerald-100 shadow-sm" aria-label="Main Navigation">
         <div className="flex items-center gap-3">
-          <Sparkles className="w-6 h-6 text-cyan-400" />
-          <h1 className="text-xl font-medium tracking-wide bg-gradient-to-r from-cyan-400 to-indigo-400 bg-clip-text text-transparent">
-            KineVox <span className="text-xs text-slate-400 font-normal">Zen Edition</span>
-          </h1>
+          <div className="p-2 bg-emerald-100/80 rounded-xl">
+            <Leaf className="w-6 h-6 text-emerald-600" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-emerald-900">Vaani</h1>
+            <p className="text-xs font-medium text-emerald-600/90">Peaceful Sign Translation</p>
+          </div>
         </div>
+
+        {/* Usability & Navigation Links */}
+        <div className="hidden md:flex items-center gap-8 text-sm font-semibold text-emerald-800">
+          <button className="flex items-center gap-2 hover:text-emerald-600 transition-colors"><Home className="w-4 h-4"/> Home</button>
+          <button className="flex items-center gap-2 hover:text-emerald-600 transition-colors"><HelpCircle className="w-4 h-4"/> How to Use</button>
+          <button className="flex items-center gap-2 hover:text-emerald-600 transition-colors"><Settings className="w-4 h-4"/> Settings</button>
+        </div>
+
         <button 
           onClick={() => setAudioMuted(!audioMuted)}
-          className="p-2 rounded-xl bg-slate-800/60 hover:bg-slate-700/60 transition border border-slate-700 text-slate-300"
+          aria-label={audioMuted ? "Unmute ambient music" : "Mute ambient music"}
+          className="p-3 rounded-full bg-emerald-100/50 hover:bg-emerald-100 transition-colors border border-emerald-200 text-emerald-700 shadow-sm"
         >
-          {audioMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5 text-cyan-400" />}
+          {audioMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5 text-emerald-600" />}
         </button>
-      </header>
+      </nav>
 
-      {/* Main Container */}
-      <main className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-6 z-10">
-        {/* Webcam Viewport */}
-        <div className="relative aspect-video rounded-2xl overflow-hidden bg-slate-900 border border-slate-800 shadow-2xl flex items-center justify-center">
-          <Webcam
-            ref={webcamRef}
-            className="absolute inset-0 w-full h-full object-cover transform -scale-x-100"
-            videoConstraints={{ width: 640, height: 480, facingMode: "user" }}
-          />
-          <canvas
-            ref={canvasRef}
-            width={640}
-            height={480}
-            className="absolute inset-0 w-full h-full object-cover transform -scale-x-100 pointer-events-none"
-          />
-          <div className="absolute top-3 left-3 flex items-center gap-2 bg-slate-950/60 backdrop-blur-md px-3 py-1 rounded-full border border-slate-800 text-xs">
-            <Activity className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-            <span>Edge Tracking Active</span>
-          </div>
-        </div>
+      {/* Primary Dashboard Layout */}
+      <main className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-12 gap-8 z-10">
+        
+        {/* Left Section: Video Feed & Skeleton Layer */}
+        <section className="lg:col-span-7 flex flex-col gap-4" aria-label="Camera Feed">
+          <div className="relative aspect-video rounded-3xl overflow-hidden bg-emerald-950/10 shadow-lg border-4 border-white/80 flex items-center justify-center">
+            
+            {!isCameraActive && (
+              <p className="absolute text-emerald-700 font-medium z-20 animate-pulse">Initializing Camera Feed...</p>
+            )}
 
-        {/* Translation Output Box */}
-        <div className="flex flex-col justify-between bg-slate-900/50 backdrop-blur-xl p-6 rounded-2xl border border-slate-800/80 shadow-2xl">
-          <div>
-            <span className="text-xs uppercase tracking-widest text-slate-500 font-semibold">Live Translation</span>
-            <div className="mt-4 p-4 rounded-xl bg-slate-950/40 border border-slate-800/50">
-              <p className="text-3xl font-light tracking-wide text-cyan-200 transition-all duration-300">
-                "{translation}"
-              </p>
+            <Webcam
+              ref={webcamRef}
+              muted
+              className="absolute inset-0 w-full h-full object-cover transform -scale-x-100 rounded-2xl"
+              videoConstraints={{ width: 640, height: 480, facingMode: "user" }}
+            />
+            <canvas
+              ref={canvasRef}
+              width={640}
+              height={480}
+              className="absolute inset-0 w-full h-full object-cover transform -scale-x-100 pointer-events-none z-10"
+            />
+            
+            <div className="absolute top-4 left-4 flex items-center gap-2 bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-sm text-xs font-semibold text-emerald-900 z-20">
+              <Activity className="w-4 h-4 text-emerald-500 animate-pulse" />
+              <span>Live Edge Tracking</span>
             </div>
           </div>
+          <p className="text-xs text-emerald-700/80 px-2 text-center lg:text-left">
+            Privacy First: Video frames remain local in your browser.
+          </p>
+        </section>
 
-          <div className="mt-6">
-            <div className="flex justify-between text-xs text-slate-400 mb-2">
-              <span>Confidence Score</span>
-              <span>{(confidence * 100).toFixed(0)}%</span>
+        {/* Right Section: Real-time Output & Visual Feedback */}
+        <section className="lg:col-span-5 flex flex-col justify-center bg-white/80 backdrop-blur-xl p-8 rounded-3xl border border-emerald-100 shadow-lg" aria-live="polite">
+          <h2 className="text-xs uppercase tracking-widest text-emerald-600 font-bold mb-6">Real-Time Translation</h2>
+          
+          <div className="flex-grow flex items-center justify-center min-h-[160px] p-6 rounded-2xl bg-emerald-50/50 border border-emerald-100/80 mb-8 transition-all">
+            <p className="text-3xl md:text-4xl font-semibold text-emerald-950 text-center leading-tight">
+              {translation}
+            </p>
+          </div>
+
+          <div className="mt-auto">
+            <div className="flex justify-between text-sm font-medium text-emerald-800 mb-3">
+              <span>Model Confidence</span>
+              <span className="font-bold text-emerald-700">{(confidence * 100).toFixed(0)}%</span>
             </div>
-            <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+            
+            <div className="w-full h-3 bg-emerald-100 rounded-full overflow-hidden shadow-inner" role="progressbar" aria-valuenow={confidence * 100} aria-valuemin={0} aria-valuemax={100}>
               <div 
-                className="h-full bg-gradient-to-r from-cyan-500 to-indigo-500 transition-all duration-300"
+                className="h-full bg-emerald-500 transition-all duration-300 ease-out rounded-full"
                 style={{ width: `${confidence * 100}%` }}
               />
             </div>
           </div>
-        </div>
+        </section>
+
       </main>
     </div>
   );
