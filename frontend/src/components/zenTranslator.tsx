@@ -1,31 +1,24 @@
 import React, { useRef, useEffect, useState } from 'react';
 import Webcam from 'react-webcam';
-import { Volume2, VolumeX, Leaf, Activity, HelpCircle, Home, Settings } from 'lucide-react';
+import { Activity, MessageSquare, Video } from 'lucide-react';
 
 declare const Hands: any;
-declare const HAND_CONNECTIONS: any;
 
-export const ZenTranslator: React.FC = () => {
+interface ZenProps {
+  apiEndpoint: string;
+  confidenceThreshold: number;
+  highContrast: boolean;
+}
+
+export const ZenTranslator: React.FC<ZenProps> = ({ apiEndpoint, confidenceThreshold, highContrast }) => {
   const webcamRef = useRef<Webcam>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const audioRef = useRef<HTMLAudioElement>(null);
-  
   const [translation, setTranslation] = useState<string>("Waiting for hand gestures...");
   const [confidence, setConfidence] = useState<number>(0);
-  const [audioMuted, setAudioMuted] = useState<boolean>(true);
-  const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
-
+  const [isVirtualCamActive, setIsVirtualCamActive] = useState(false);
+  
+  const isHC = highContrast;
   const lastSentRef = useRef<number>(0);
-
-  useEffect(() => {
-    if (audioRef.current) {
-      if (audioMuted) {
-        audioRef.current.pause();
-      } else {
-        audioRef.current.play().catch(() => {});
-      }
-    }
-  }, [audioMuted]);
 
   useEffect(() => {
     const hands = new Hands({
@@ -35,8 +28,8 @@ export const ZenTranslator: React.FC = () => {
     hands.setOptions({
       maxNumHands: 1,
       modelComplexity: 1,
-      minDetectionConfidence: 0.6,
-      minTrackingConfidence: 0.6,
+      minDetectionConfidence: confidenceThreshold,
+      minTrackingConfidence: confidenceThreshold,
     });
 
     hands.onResults(onResults);
@@ -49,7 +42,6 @@ export const ZenTranslator: React.FC = () => {
         webcamRef.current.video &&
         webcamRef.current.video.readyState === 4
       ) {
-        setIsCameraActive(true);
         await hands.send({ image: webcamRef.current.video });
       }
       animationFrameId = requestAnimationFrame(processVideoFrame);
@@ -63,7 +55,7 @@ export const ZenTranslator: React.FC = () => {
       }
       hands.close();
     };
-  }, []);
+  }, [confidenceThreshold]);
 
   const onResults = (results: any) => {
     const canvas = canvasRef.current;
@@ -76,16 +68,19 @@ export const ZenTranslator: React.FC = () => {
 
     if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
       const landmarks = results.multiHandLandmarks[0];
+      
+      // Access HAND_CONNECTIONS from the window object loaded via CDN script in index.html
+      const connections = (window as any).HAND_CONNECTIONS;
 
-      // Draw Serene Green Skeleton Connections
-      if (typeof HAND_CONNECTIONS !== 'undefined') {
-        for (const connection of HAND_CONNECTIONS) {
+      // Draw Skeleton Connections
+      if (connections) {
+        for (const connection of connections) {
           const from = landmarks[connection[0]];
           const to = landmarks[connection[1]];
           ctx.beginPath();
           ctx.moveTo(from.x * canvas.width, from.y * canvas.height);
           ctx.lineTo(to.x * canvas.width, to.y * canvas.height);
-          ctx.strokeStyle = '#34d399'; // emerald-400
+          ctx.strokeStyle = isHC ? '#facc15' : '#34d399'; 
           ctx.lineWidth = 4;
           ctx.stroke();
         }
@@ -95,7 +90,7 @@ export const ZenTranslator: React.FC = () => {
       for (const lm of landmarks) {
         ctx.beginPath();
         ctx.arc(lm.x * canvas.width, lm.y * canvas.height, 5, 0, 2 * Math.PI);
-        ctx.fillStyle = '#059669'; // emerald-600
+        ctx.fillStyle = isHC ? '#ca8a04' : '#059669'; 
         ctx.fill();
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 1.5;
@@ -116,113 +111,107 @@ export const ZenTranslator: React.FC = () => {
 
   const sendLandmarksToBackend = async (landmarks: any[]) => {
     try {
-      const response = await fetch('http://localhost:8000/predict', {
+      const response = await fetch(apiEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ landmarks }),
       });
       const data = await response.json();
-      setTranslation(data.gesture);
-      setConfidence(data.confidence);
+      setTranslation(data.gesture || "Translating...");
+      setConfidence(data.confidence || 0);
     } catch (err) {
-      // Prevent console pollution during development before backend API is online
+      // Quietly handle connection errors if backend isn't up yet
     }
   };
 
+  const quickPhrases = [
+    "I need a doctor.", "Where is the bus stop?", "Thank you.", "Please wait."
+  ];
+
   return (
-    <div className="min-h-screen bg-emerald-50/60 text-emerald-950 flex flex-col items-center p-4 md:p-8 font-sans transition-colors duration-500">
+    <div className="w-full max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 z-10">
       
-      {/* Background Ambient Audio */}
-      <audio ref={audioRef} src="/ambient.mp3" loop />
-
-      {/* Main Navigation Header */}
-      <nav className="w-full max-w-6xl flex items-center justify-between mb-8 bg-white/70 backdrop-blur-lg px-6 py-4 rounded-2xl border border-emerald-100 shadow-sm" aria-label="Main Navigation">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-emerald-100/80 rounded-xl">
-            <Leaf className="w-6 h-6 text-emerald-600" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-emerald-900">Vaani</h1>
-            <p className="text-xs font-medium text-emerald-600/90">Peaceful Sign Translation</p>
+      {/* Left Column: Camera & Virtual Cam Controls */}
+      <section className="lg:col-span-7 flex flex-col gap-4">
+        <div className={`relative aspect-video rounded-3xl overflow-hidden shadow-lg border-4 flex items-center justify-center
+          ${isHC ? 'bg-gray-900 border-yellow-500' : 'bg-emerald-950/10 border-white/80'}`}>
+          <Webcam
+            ref={webcamRef}
+            muted
+            className="absolute inset-0 w-full h-full object-cover transform -scale-x-100 rounded-2xl"
+          />
+          <canvas
+            ref={canvasRef}
+            width={640} height={480}
+            className="absolute inset-0 w-full h-full object-cover transform -scale-x-100 pointer-events-none z-10"
+          />
+          <div className={`absolute top-4 left-4 flex items-center gap-2 px-3 py-1.5 rounded-full shadow-sm text-xs font-bold z-20
+            ${isHC ? 'bg-gray-900 text-yellow-400' : 'bg-white/90 text-emerald-900'}`}>
+            <Activity className={`w-4 h-4 animate-pulse ${isHC ? 'text-yellow-500' : 'text-emerald-500'}`} />
+            Live Tracking
           </div>
         </div>
 
-        {/* Usability & Navigation Links */}
-        <div className="hidden md:flex items-center gap-8 text-sm font-semibold text-emerald-800">
-          <button className="flex items-center gap-2 hover:text-emerald-600 transition-colors"><Home className="w-4 h-4"/> Home</button>
-          <button className="flex items-center gap-2 hover:text-emerald-600 transition-colors"><HelpCircle className="w-4 h-4"/> How to Use</button>
-          <button className="flex items-center gap-2 hover:text-emerald-600 transition-colors"><Settings className="w-4 h-4"/> Settings</button>
+        {/* Video Call Integration Panel */}
+        <div className={`p-4 rounded-2xl flex items-center justify-between border ${isHC ? 'bg-gray-900 border-yellow-900' : 'bg-white/60 border-emerald-200'}`}>
+          <div className="flex items-center gap-3">
+            <Video className={`w-6 h-6 ${isHC ? 'text-yellow-400' : 'text-emerald-600'}`} />
+            <div>
+              <h3 className="font-bold text-sm">Virtual Camera (Meet/Zoom)</h3>
+              <p className="text-xs opacity-70">Broadcast translations as subtitles in your video calls.</p>
+            </div>
+          </div>
+          <button 
+            onClick={() => setIsVirtualCamActive(!isVirtualCamActive)}
+            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
+              isVirtualCamActive 
+                ? 'bg-red-500 text-white' 
+                : (isHC ? 'bg-yellow-500 text-gray-900' : 'bg-emerald-600 text-white')
+            }`}
+          >
+            {isVirtualCamActive ? 'Stop Output' : 'Start Virtual Cam'}
+          </button>
         </div>
+      </section>
 
-        <button 
-          onClick={() => setAudioMuted(!audioMuted)}
-          aria-label={audioMuted ? "Unmute ambient music" : "Mute ambient music"}
-          className="p-3 rounded-full bg-emerald-100/50 hover:bg-emerald-100 transition-colors border border-emerald-200 text-emerald-700 shadow-sm"
-        >
-          {audioMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5 text-emerald-600" />}
-        </button>
-      </nav>
-
-      {/* Primary Dashboard Layout */}
-      <main className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-12 gap-8 z-10">
+      {/* Right Column: Output & Custom Phrases */}
+      <section className="lg:col-span-5 flex flex-col gap-6">
         
-        {/* Left Section: Video Feed & Skeleton Layer */}
-        <section className="lg:col-span-7 flex flex-col gap-4" aria-label="Camera Feed">
-          <div className="relative aspect-video rounded-3xl overflow-hidden bg-emerald-950/10 shadow-lg border-4 border-white/80 flex items-center justify-center">
-            
-            {!isCameraActive && (
-              <p className="absolute text-emerald-700 font-medium z-20 animate-pulse">Initializing Camera Feed...</p>
-            )}
-
-            <Webcam
-              ref={webcamRef}
-              muted
-              className="absolute inset-0 w-full h-full object-cover transform -scale-x-100 rounded-2xl"
-              videoConstraints={{ width: 640, height: 480, facingMode: "user" }}
-            />
-            <canvas
-              ref={canvasRef}
-              width={640}
-              height={480}
-              className="absolute inset-0 w-full h-full object-cover transform -scale-x-100 pointer-events-none z-10"
-            />
-            
-            <div className="absolute top-4 left-4 flex items-center gap-2 bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-sm text-xs font-semibold text-emerald-900 z-20">
-              <Activity className="w-4 h-4 text-emerald-500 animate-pulse" />
-              <span>Live Edge Tracking</span>
-            </div>
-          </div>
-          <p className="text-xs text-emerald-700/80 px-2 text-center lg:text-left">
-            Privacy First: Video frames remain local in your browser.
+        {/* Real-time Output Card */}
+        <div className={`flex flex-col justify-center p-8 rounded-3xl border shadow-lg h-64
+          ${isHC ? 'bg-gray-900 border-yellow-500' : 'bg-white/80 border-emerald-100'}`}>
+          <h2 className="text-xs uppercase tracking-widest font-bold mb-4 opacity-70">Translation</h2>
+          <p className="text-3xl md:text-4xl font-semibold text-center leading-tight mb-auto">
+            {translation}
           </p>
-        </section>
-
-        {/* Right Section: Real-time Output & Visual Feedback */}
-        <section className="lg:col-span-5 flex flex-col justify-center bg-white/80 backdrop-blur-xl p-8 rounded-3xl border border-emerald-100 shadow-lg" aria-live="polite">
-          <h2 className="text-xs uppercase tracking-widest text-emerald-600 font-bold mb-6">Real-Time Translation</h2>
-          
-          <div className="flex-grow flex items-center justify-center min-h-[160px] p-6 rounded-2xl bg-emerald-50/50 border border-emerald-100/80 mb-8 transition-all">
-            <p className="text-3xl md:text-4xl font-semibold text-emerald-950 text-center leading-tight">
-              {translation}
-            </p>
+          <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden mt-4">
+            <div className={`h-full transition-all duration-300 ${isHC ? 'bg-yellow-400' : 'bg-emerald-500'}`} style={{ width: `${confidence * 100}%` }} />
           </div>
+        </div>
 
-          <div className="mt-auto">
-            <div className="flex justify-between text-sm font-medium text-emerald-800 mb-3">
-              <span>Model Confidence</span>
-              <span className="font-bold text-emerald-700">{(confidence * 100).toFixed(0)}%</span>
-            </div>
-            
-            <div className="w-full h-3 bg-emerald-100 rounded-full overflow-hidden shadow-inner" role="progressbar" aria-valuenow={confidence * 100} aria-valuemin={0} aria-valuemax={100}>
-              <div 
-                className="h-full bg-emerald-500 transition-all duration-300 ease-out rounded-full"
-                style={{ width: `${confidence * 100}%` }}
-              />
-            </div>
+        {/* Custom Quick Phrases */}
+        <div className={`p-6 rounded-3xl border shadow-sm ${isHC ? 'bg-gray-900 border-yellow-800' : 'bg-white/60 border-emerald-100'}`}>
+          <div className="flex items-center gap-2 mb-4">
+            <MessageSquare className="w-5 h-5 opacity-70" />
+            <h3 className="font-bold text-sm">Custom Quick Phrases</h3>
           </div>
-        </section>
-
-      </main>
+          <div className="grid grid-cols-2 gap-3">
+            {quickPhrases.map((phrase, idx) => (
+              <button 
+                key={idx}
+                onClick={() => setTranslation(phrase)}
+                className={`p-3 text-left rounded-xl text-sm font-medium transition-colors border
+                  ${isHC ? 'bg-gray-800 border-yellow-900 hover:border-yellow-400' : 'bg-emerald-50 border-emerald-100 hover:bg-emerald-100'}`}
+              >
+                {phrase}
+              </button>
+            ))}
+          </div>
+          <button className="w-full mt-4 py-2 border-2 border-dashed rounded-xl text-sm font-bold opacity-60 hover:opacity-100 transition-opacity">
+            + Add New Phrase
+          </button>
+        </div>
+      </section>
     </div>
   );
 };
