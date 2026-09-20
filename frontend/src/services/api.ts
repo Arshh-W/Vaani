@@ -1,7 +1,7 @@
 /**
  * Base URL configuration for local vs production environments
  */
-const DEFAULT_API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const DEFAULT_API_URL = import.meta.env.VITE_API_URL;
 
 /**
  * Send extracted hand landmark features to FastAPI backend
