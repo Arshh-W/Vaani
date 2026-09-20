@@ -10,18 +10,15 @@ from mediapipe.tasks.python import vision
 import os
 import base64
 
-app = FastAPI(title="Vaani Backend API", version="1.0")
+app = FastAPI()
 
-# Enable CORS for your React/Vite frontend development server
+# ⚠️ PLACE THIS AT THE VERY TOP, BEFORE ANY ROUTERS OR CODE
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://vaaniiii.netlify.app", # Your exact Netlify frontend URL
-        "http://localhost:5173",          # Keeps local testing working too
-    ],
+    allow_origins=["*"],  # Allows all origins, fixing preflight errors instantly
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Allows POST, OPTIONS, GET, etc.
+    allow_headers=["*"],  # Allows Content-Type and other headers
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -30,17 +27,22 @@ SCALER_PATH = os.path.join(BASE_DIR, "scaler.pkl")
 TASK_MODEL_PATH = os.path.join(BASE_DIR, "hand_landmarker.task")
 
 # Load model, scaler, and landmarker at startup if available
+clf = None
+scaler = None
+detector = None
+
 try:
     clf = joblib.load(MODEL_PATH) if os.path.exists(MODEL_PATH) else None
     scaler = joblib.load(SCALER_PATH) if os.path.exists(SCALER_PATH) else None
     
-    base_options = python.BaseOptions(model_asset_path=TASK_MODEL_PATH)
-    options = vision.HandLandmarkerOptions(
-        base_options=base_options,
-        running_mode=vision.RunningMode.IMAGE,
-        num_hands=1
-    )
-    detector = vision.HandLandmarker.create_from_options(options)
+    if os.path.exists(TASK_MODEL_PATH):
+        base_options = python.BaseOptions(model_asset_path=TASK_MODEL_PATH)
+        options = vision.HandLandmarkerOptions(
+            base_options=base_options,
+            running_mode=vision.RunningMode.IMAGE,
+            num_hands=1
+        )
+        detector = vision.HandLandmarker.create_from_options(options)
     print("[Info] FastAPI backend components initialized.")
 except Exception as e:
     print(f"[Warning] Initialization warning: {e}")
@@ -52,7 +54,7 @@ class FeatureInput(BaseModel):
 def read_root():
     return {
         "status": "Vaani backend is running",
-        "model_loaded": os.path.exists(MODEL_PATH) and os.path.exists(SCALER_PATH)
+        "model_loaded": clf is not None and scaler is not None
     }
 
 @app.post("/predict/features")
@@ -123,6 +125,9 @@ async def predict_from_image(request: Request):
                 }
 
         # 2. Fallback: Raw image bytes / form-data
+        if not detector:
+            raise HTTPException(status_code=500, detail="MediaPipe landmarker task model not initialized on server.")
+
         contents = await request.body()
         if not contents:
             raise HTTPException(status_code=400, detail="No valid payload received.")
