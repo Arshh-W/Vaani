@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState } from "react";
+import { predictFromImageBlob } from "../services/api";
 
 export default function SignDetector() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -53,20 +54,11 @@ export default function SignDetector() {
         canvas.height = video.videoHeight;
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        // Convert canvas frame to a JPEG blob and send to backend
+        // Convert canvas frame to a JPEG blob and send using the api.ts helper
         canvas.toBlob(async (blob) => {
           if (!blob) return;
           try {
-            const response = await fetch("http://127.0.0.1:8000/predict/image", {
-              method: "POST",
-              body: blob,
-              headers: { "Content-Type": "image/jpeg" },
-            });
-            
-            if (!response.ok) return;
-            
-            const data = await response.json();
-            const text = data.prediction || data.result || data.text || data.label || data.sign;
+            const text = await predictFromImageBlob(blob);
             
             if (text) {
               setCurrentSign(text);
