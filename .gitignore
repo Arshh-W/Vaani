@@ -40,3 +40,9 @@ Thumbs.db
 # Large model artifacts / checkpoints (optional - uncomment if model weights exceed git limits)
 # *.pth
 # *.onnx
+# Ignore datasets and large models
+datasets/
+*.csv
+*.json
+*.zip
+model.pkl
