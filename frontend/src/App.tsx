@@ -18,10 +18,10 @@ export function App() {
   
   const [highContrast, setHighContrast] = useState(false);
   const [largeText, setLargeText] = useState(false);
-  // Default to the FastAPI image/frame prediction endpoint
-  // Change the hardcoded localhost string to this:
+  
+// Ensure your state includes the endpoint path, like this:
 const [apiEndpoint, setApiEndpoint] = useState(
-  import.meta.env.VITE_API_URL || 'https://vaani-8wmy.onrender.com'
+  (import.meta.env.VITE_API_URL || 'https://vaani-8wmy.onrender.com') + '/predict/image'
 );
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.6);
 
